@@ -2,6 +2,7 @@ import json
 import sys
 import getopt
 import os
+import requests
 
 
 metadata_file = "./metadata.json"
@@ -11,7 +12,6 @@ def main():
 
     tumor_type = None
     command = None
-    outdirectory = None
 
 
     #parser command line options
@@ -26,10 +26,10 @@ def main():
         elif o in ("-t", "--tumor"):
             tumor_type = "TCGA-"+a
         elif o in ("-c", "--command"):
-            if a.lower() in ("normal", "tumoral", "normalAssociated"):
+            if a.lower() in ("normal", "tumoral", "normalassociated"):
                 command = a
             else:
-                sys.exit(2)
+                assert False, "unhandled value for command"
         else:
             assert False, "unhandled option"
 
@@ -90,27 +90,31 @@ def main():
     os.makedirs(downloaddirectory)
 
     #download files
-    for f in ids2download:
-        os.system("(cd " + downloaddirectory + "; ../../gdc-client download " + f +")")
+    for i in range(0, len(ids2download)):
+        f = ids2download[i]
+        sys.stdout.write("\rDownloading file " + str(i) + " of " + str(len(ids2download)))
+        sys.stdout.flush()
+        fileout = downloaddirectory + "/" + f + ".fpkm.gz"
+        while True:
+            response = requests.get('https://gdc-api.nci.nih.gov/data/' + f)
+            if response.status_code == 200:
+                with open(fileout, 'wb') as o:
+                    o.write(response.content)
+                break
 
     print("File downloaded, unzipping...")
-    os.system("(cd " + downloaddirectory + "; gunzip */*.gz)")
-
-    print("Copying files...")
-    os.system("(cd " + downloaddirectory + "; rm */annotations.txt .)")
-    os.system("(cd " + downloaddirectory + "; cp */*.txt .)")
-    os.system("(cd " + downloaddirectory + "; rm -rf */)")
+    os.system("(cd " + downloaddirectory + "; gunzip *)")
 
     print("Extract expressions...")
     for filename in os.listdir(downloaddirectory):
         os.system("(cd " + downloaddirectory +
                   "; grep  -v __ " + filename +
                   "| cut -f 2 > " + filename + ".expr)")
-    filename = [filename for filename in os.listdir(downloaddirectory) if filename.endswith(".txt")][0]
+    filename = [filename for filename in os.listdir(downloaddirectory) if filename.endswith(".fpkm")][0]
     os.system("(cd " + downloaddirectory +
               "; grep -v __ "+ filename +" | cut -f 1  > genes.ids)")
     os.system("(cd " + downloaddirectory +
-              "; rm *.txt)")
+              "; rm *.fpkm)")
 
     print("Building the expression matrix...")
     expr_list = []
