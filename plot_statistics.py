@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as sp
 import sys
+import random
+import seaborn as sns
 
 def parser_matrix(line):
     s = line.strip().split("\t")
@@ -75,7 +77,7 @@ def main():
     ax.set_ylabel("Log normal median expression")
     plt.savefig("normal-mean-median-" + sys.argv[1] +'.png')
 
-    ig1, ax = plt.subplots()
+    fig1, ax = plt.subplots()
     ax.scatter(list(map(np.log, [np.mean(x[3]) for x in tumoral_data])),
                list(map(np.log, [np.median(x[3]) for x in tumoral_data])), s=1)
     ax.plot([0,20], [0,20], c='r')
@@ -84,13 +86,52 @@ def main():
     ax.set_ylabel("Log normal median expression")
     plt.savefig("tumoral-mean-median-" + sys.argv[1] +'.png')
 
-    pvals = sorted(map(lambda z : (z[0][0], sp.ttest_ind(z[0][3],z[1][3])[1]),
-                       zip(normal_data, tumoral_data)),
-                   key = lambda x :x[1])
+    #boxplot of the correlation ratio
+    fig1, ax = plt.subplots()
+    ratio = list(map(lambda x: (np.mean(x[1][3])+1.0) / (np.mean(x[0][3])+1.0),
+                     zip(normal_data, tumoral_data)))
+    ax.boxplot(ratio)
+    ax.set_yscale('log')
+    plt.savefig("ratio-distribution-" + sys.argv[1] +'.png')
 
-    print(list(pvals)[0:10])
+    fig1, ax = plt.subplots()
+    delta = list(map(lambda x: (np.mean(x[1][3])+1.0) - (np.mean(x[0][3])+1.0),
+                     zip(normal_data, tumoral_data)))
+    ax.boxplot(delta)
+    plt.savefig("delta-distribution-" + sys.argv[1] +'.png')
 
-    print([x for x in pvals if x[0] == 'ENSG00000136997'])
+    ratio_mean_distribution = []
+    for x in range(1000):
+        ratio_mean_distribution.append(np.mean(random.sample(ratio, 200)))
+
+    #boxplot of the ratio mean
+    fig1, ax = plt.subplots()
+    ax.boxplot([ratio, ratio_mean_distribution])
+    ax.set_yscale('log')
+    plt.savefig("ratio-mean-boxplot-" + sys.argv[1] +'.png')
+
+    fig1, ax = plt.subplots(figsize=(10,10))
+    sns.distplot([np.log(x) for x in ratio], ax=ax)
+    sns.distplot([np.log(x) for x in ratio_mean_distribution], ax=ax)
+    plt.savefig("ratio-mean-distplot-" + sys.argv[1] +'.png')
+
+    normal_patient_sum = []
+    tumor_patient_sum = []
+    for i in range(len(normal_data[0][3])):
+        s = 0.0
+        for g in normal_data:
+            s += g[3][i]
+        normal_patient_sum.append(s)
+
+    for i in range(len(tumoral_data[0][3])):
+        s = 0.0
+        for g in tumoral_data:
+            s += g[3][i]
+        tumor_patient_sum.append(s)
+
+    fig1, ax = plt.subplots(figsize=(10,10))
+    ax.boxplot([normal_patient_sum, tumor_patient_sum])
+    plt.savefig("patient-wise-sum-" + sys.argv[1] +'.png')
 
 
 def usage():
