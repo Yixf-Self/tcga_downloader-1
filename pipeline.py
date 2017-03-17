@@ -2,19 +2,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 import seaborn as sns
+import os
+import pylatex
 import scipy
+import sys
 
 
-tumor = "BLCA"
-junction_file = "stefano/ctcf_biostring_lucilla.tsv"
-max_distance = 100000
+junction_file = "additional_data/ctcf_biostring_lucilla.tsv"
 number_null_simulations = 1
 list_genes = []
 list_junctions = []
 list_mutations = []
+tumors = ["PRAD", "BLCA"]
+max_distances = [10000, 50000]
+thresholds = [0.05, 0.1]
 
 
-list_chroms = ["chr" + str(x) for x in range(1,23)]
+list_chroms = ["chr" + str(x) for x in range(21,23)]
 
 class GeneAnnotation:
     def __init__(self, l):
@@ -64,7 +68,6 @@ class Mutation:
 
 def map_junction_genes(ljunctions, lgenes):
     for c in list_chroms:
-        print(c)
         fj = [x for x in ljunctions if x.chrom == c]
         fg = [x for x in lgenes if x.chrom == c]
         for j in fj:
@@ -79,7 +82,6 @@ def map_junction_genes(ljunctions, lgenes):
 
 def map_left_and_right_junction(ljunctions):
     for c in list_chroms:
-        print(c)
         fj = [x for x in ljunctions if x.chrom == c]
         for j in fj:
             left_js = list(filter(lambda x: x.center < j.center,
@@ -110,6 +112,7 @@ def point_D_filter(j):
 class Point_E_ratio:
     def __init__(self):
         self.msg = "mean of ratio"
+        self.tag = "MeanOfRatio"
 
     def score(self, j, normal_expr, tumor_expr):
         list_ratio = []
@@ -126,6 +129,34 @@ class Point_E_ratio:
             random_ratio.append((np.mean(tumor_expr[x])+1.0) /
                                 (np.mean(normal_expr[x])+1.0))
         j.add_null_score(np.mean(random_ratio))
+
+class Point_E_maxLR:
+    def __init__(self):
+        self.msg = "max left/right mean ratio"
+        self.tag = "MaxLeftRightMeanRatio"
+
+    def score(self, j, normal_expr, tumor_expr):
+        list_ratio_left = []
+        list_ratio_right = []
+        for x in j.left_genes:
+            mt = np.mean(tumor_expr[x.name])+1.0
+            mn = np.mean(normal_expr[x.name])+1.0
+            list_ratio_left.append(mt/mn)
+        left_ratio = np.mean(list_ratio_left)
+        for x in j.right_genes:
+            mt = np.mean(tumor_expr[x.name])+1.0
+            mn = np.mean(normal_expr[x.name])+1.0
+            list_ratio_right.append(mt/mn)
+        right_ratio = np.mean(list_ratio_right)
+
+        if left_ratio > right_ratio:
+            j.set_score(left_ratio)
+        else:
+            j.set_score(right_ratio)
+
+    def null_score(self, j, normal_expr, tumor_expr):
+
+        j.add_null_score(-1.0)
 
 def get_outliers_slope(distribution):
 
@@ -146,11 +177,21 @@ def check_mutation_juntion_intersection(list_mutations, list_junctions):
 
     print(str(count_mutations)," mutations; ", str(count_intersecting), " overlapping")
 
+def get_pval(mu, sigma, v):
+    if sigma == 0:
+        return 0
+    else:
+        P = scipy.stats.norm.cdf((v-mu)/ sigma)
+        if P > 0.5:
+            return 1.0 - P
+        else:
+            return P
 
-def main():
+def do_analysis(doc):
 
     normal_expr = dict([parse_expr_data(x) for x in open("TCGA-" + tumor + "-normal/TCGA-" + tumor + "-expression-normal.matrix")])
     tumor_expr = dict([parse_expr_data(x) for x in open("TCGA-" + tumor + "-normalAssociated/TCGA-" + tumor + "-expression-normalAssociated.matrix")])
+
     print("normal genes: ", len(normal_expr.keys()))
     print("tumor genes: ", len(tumor_expr.keys()))
 
@@ -168,56 +209,87 @@ def main():
     list_junctions = list(filter(point_D_filter, list_junctions))
     print("Junctions after filtering: ", len(list_junctions))
 
-    list_mutations = [Mutation(x) for x in open("stefano/somatic_mutations.txt")]
+    list_mutations = [Mutation(x) for x in open("additional_data/somatic_mutations.txt")]
     check_mutation_juntion_intersection(list_mutations, list_junctions)
 
-    fig1, ax = plt.subplots()
-    ax.boxplot([[len(x.left_genes) for x in list_junctions],
-                [len(x.right_genes) for x in list_junctions]])
-    ax.set_title("Junctions (" + str(len(list_junctions)) + ") - Genes (" + str(len(list_genes)) + ")" + ", threshold = " + str(max_distance))
-    #ax.set_yscale('log')
-    ax.set_xticklabels(["Left", "Right"])
-    ax.set_ylabel("Genes Count")
-    plt.savefig("s-"+ tumor +"left-right-distribution.png")
-
-
-    method_E = Point_E_ratio()
-
     for j in list_junctions:
-        method_E.score(j, normal_expr, tumor_expr)
+        e_method.score(j, normal_expr, tumor_expr)
 
     for i in range(number_null_simulations):
-        print(str(i))
         for j in list_junctions:
-            method_E.null_score(j, normal_expr, tumor_expr)
-
-    score_values = sorted([x.score for x in list_junctions])
+            e_method.null_score(j, normal_expr, tumor_expr)
 
     sorted_junctions = list(sorted(list_junctions, key = lambda x: x.score))
+
+    with doc.create(pylatex.Tabular("l|r|r|r|r|r",
+                             row_height=1.5)) as data_table:
+        data_table.add_row(["class",
+                            "thresh.",
+                            "num.",
+                            "mean",
+                            "std",
+                            "pval"],
+                           mapper=pylatex.utils.bold,
+                           color="lightgray")
+        data_table.add_hline()
+        for px in thresholds:
+            #top_outliers_position = get_outliers_slope(sorted_junctions)
+            top_outliers_position = int((1-px)*len(sorted_junctions))
+            bottom_outliers_position = int(px*len(sorted_junctions))
+            count_bottom_mutations = []
+            count_junctions_mutations = []
+            count_outliers_mutations = []
+            for c in list_chroms:
+                fb = [x for x in sorted_junctions[0:bottom_outliers_position] if x.chrom == c]
+                fj = [x for x in sorted_junctions[bottom_outliers_position:top_outliers_position] if x.chrom == c]
+                fo = [x for x in sorted_junctions[top_outliers_position:] if x.chrom == c]
+                fm = [x for x in list_mutations if x.chrom == c]
+
+                for j in fb:
+                    count_bottom_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
+
+                for j in fj:
+                    count_junctions_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
+
+                for j in fo:
+                    count_outliers_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
+            null_mean = np.mean(count_junctions_mutations)
+            null_std = np.mean(count_junctions_mutations)
+            data_table.add_row(("center",
+                                str(px),
+                                str(top_outliers_position-bottom_outliers_position),
+                                '%.5f' % np.mean(count_junctions_mutations),
+                                '%.5f' % np.std(count_junctions_mutations),
+                                get_pval(null_mean, null_std, np.mean(count_junctions_mutations))
+                                ))
+            if np.mean(count_bottom_mutations) > null_std:
+                bottom_name = "bottom UP"
+            else:
+                bottom_name = "bottom DOWN"
+            data_table.add_row((bottom_name,
+                                str(px),
+                                str(bottom_outliers_position),
+                                '%.5f' % np.mean(count_bottom_mutations),
+                                '%.5f' % np.std(count_bottom_mutations),
+                                get_pval(null_mean, null_std, np.mean(count_bottom_mutations))
+                                ))
+            if np.mean(count_outliers_mutations) > null_std:
+                top_name = "top UP"
+            else:
+                top_name = "top DOWN"
+            data_table.add_row((top_name,
+                                str(px),
+                                str(len(sorted_junctions) - top_outliers_position),
+                                '%.5f' % np.mean(count_outliers_mutations),
+                                '%.5f' % np.std(count_outliers_mutations),
+                                get_pval(null_mean, null_std, np.mean(count_outliers_mutations))
+                                ))
+            data_table.add_hline()
+
     #top_outliers_position = get_outliers_slope(sorted_junctions)
     top_outliers_position = int(0.95*len(sorted_junctions))
     bottom_outliers_position = int(0.05*len(sorted_junctions))
 
-    fig1, ax = plt.subplots()
-    ax.plot(
-        range(len(score_values)),
-        score_values,
-        c='r'
-    )
-    for i in range(number_null_simulations):
-        print(i)
-        null_score_values = sorted([j.null_score[i] for j in list_junctions])
-        ax.plot(
-            range(len(null_score_values)),
-            null_score_values,
-            c='b'
-        )
-    ax.axvline(top_outliers_position)
-    ax.axvline(bottom_outliers_position)
-    ax.set_title(tumor + ": sorted score " + method_E.msg)
-    ax.set_yscale('log')
-    ax.set_ylabel("Score")
-    plt.savefig("s-"+ tumor +"score-sorted.png")
 
     count_bottom_mutations = []
     count_junctions_mutations = []
@@ -237,14 +309,8 @@ def main():
         for j in fo:
             count_outliers_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
 
-    print("Mutation per junction: ",  top_outliers_position-bottom_outliers_position, np.mean(count_junctions_mutations), np.std(count_junctions_mutations))
-    print("Mutation per top outlier: ", len(sorted_junctions) - top_outliers_position, np.mean(count_outliers_mutations), np.std(count_outliers_mutations))
-    print("Mutation per low outlier: ", bottom_outliers_position, np.mean(count_bottom_mutations), np.std(count_bottom_mutations))
-
-
     mutations_count = []
-    for i in range(100):
-        print(i)
+    for i in range(250):
         count_mut = []
         samp = random.sample(sorted_junctions, bottom_outliers_position)
         for c in list_chroms:
@@ -254,12 +320,32 @@ def main():
                 count_mut.append(len([m for m in fm if j.start < m.position < j.stop]))
         mutations_count.append(np.mean(count_mut))
 
+e_methods = [Point_E_ratio(), Point_E_maxLR()]
 
-    fig1, ax = plt.subplots()
-    sns.distplot(mutations_count, ax=ax)
-    plt.savefig("s-"+ tumor +"-distribution.png")
+def main():
 
-    print(np.mean(mutations_count), np.std(mutations_count))
+    if not os.path.exists("report"):
+        os.mkdir("report")
+    doc = pylatex.Document('report/results')
+
+    global tumor
+    global max_distance
+    global e_method
+
+    for t in tumors:
+        print(t)
+        doc.append(pylatex.NewPage())
+        with doc.create(pylatex.Section(t)):
+            for m in e_methods:
+                for d in max_distances:
+                    tumor = t
+                    max_distance = d
+                    e_method = m
+                    with doc.create(pylatex.Subsection("Score = " + m.tag + ", Max dist. = " + str(d))):
+                        do_analysis(doc)
+
+    doc.generate_pdf(clean_tex=False)
+
 
 
 if __name__ == "__main__":
