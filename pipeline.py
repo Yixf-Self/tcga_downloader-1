@@ -216,9 +216,9 @@ def do_analysis(doc):
     for j in list_junctions:
         e_method.score(j, normal_expr, tumor_expr)
 
-    for i in range(number_null_simulations):
-        for j in list_junctions:
-            e_method.null_score(j, normal_expr, tumor_expr)
+    #for i in range(number_null_simulations):
+    #    for j in list_junctions:
+    #        e_method.null_score(j, normal_expr, tumor_expr)
 
     sorted_junctions = list(sorted(list_junctions, key = lambda x: x.score))
 
