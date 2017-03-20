@@ -13,12 +13,13 @@ number_null_simulations = 1
 list_genes = []
 list_junctions = []
 list_mutations = []
-tumors = ["PRAD", "BLCA"]
-max_distances = [10000, 50000]
-thresholds = [0.05, 0.1]
+#tumors = ["PRAD", "BLCA", "BRCA", "LIHC", "LUAD", "KIRC", "KIRP", "UCEC", "THCA", "HNSC", "LUSC"]
+tumors = ["PRAD", "BLCA", "LIHC", "LUAD", "KIRC", "KIRP", "UCEC", "THCA", "HNSC", "LUSC"]
+max_distances = [10000, 50000, 100000,200000]
+thresholds = [0.01, 0.05, 0.1]
 
 
-list_chroms = ["chr" + str(x) for x in range(21,23)]
+list_chroms = ["chr" + str(x) for x in range(1,23)]
 
 class GeneAnnotation:
     def __init__(self, l):
@@ -254,7 +255,7 @@ def do_analysis(doc):
                 for j in fo:
                     count_outliers_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
             null_mean = np.mean(count_junctions_mutations)
-            null_std = np.mean(count_junctions_mutations)
+            null_std = np.std(count_junctions_mutations)
             data_table.add_row(("center",
                                 str(px),
                                 str(top_outliers_position-bottom_outliers_position),
@@ -262,7 +263,7 @@ def do_analysis(doc):
                                 '%.5f' % np.std(count_junctions_mutations),
                                 get_pval(null_mean, null_std, np.mean(count_junctions_mutations))
                                 ))
-            if np.mean(count_bottom_mutations) > null_std:
+            if np.mean(count_bottom_mutations) > null_mean:
                 bottom_name = "bottom UP"
             else:
                 bottom_name = "bottom DOWN"
@@ -273,7 +274,7 @@ def do_analysis(doc):
                                 '%.5f' % np.std(count_bottom_mutations),
                                 get_pval(null_mean, null_std, np.mean(count_bottom_mutations))
                                 ))
-            if np.mean(count_outliers_mutations) > null_std:
+            if np.mean(count_outliers_mutations) > null_mean:
                 top_name = "top UP"
             else:
                 top_name = "top DOWN"
@@ -326,7 +327,6 @@ def main():
 
     if not os.path.exists("report"):
         os.mkdir("report")
-    doc = pylatex.Document('report/results')
 
     global tumor
     global max_distance
@@ -334,6 +334,7 @@ def main():
 
     for t in tumors:
         print(t)
+        doc = pylatex.Document('report/results'+t)
         doc.append(pylatex.NewPage())
         with doc.create(pylatex.Section(t)):
             for m in e_methods:
@@ -344,7 +345,7 @@ def main():
                     with doc.create(pylatex.Subsection("Score = " + m.tag + ", Max dist. = " + str(d))):
                         do_analysis(doc)
 
-    doc.generate_pdf(clean_tex=False)
+        doc.generate_pdf(clean_tex=False)
 
 
 
