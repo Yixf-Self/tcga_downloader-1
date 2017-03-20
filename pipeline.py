@@ -1,11 +1,8 @@
-import matplotlib.pyplot as plt
 import numpy as np
 import random
-import seaborn as sns
 import os
 import pylatex
-import scipy
-import sys
+from scipy import stats
 
 
 junction_file = "additional_data/ctcf_biostring_lucilla.tsv"
@@ -182,7 +179,7 @@ def get_pval(mu, sigma, v):
     if sigma == 0:
         return 0
     else:
-        P = scipy.stats.norm.cdf((v-mu)/ sigma)
+        P = stats.norm.cdf((v-mu)/ sigma)
         if P > 0.5:
             return 1.0 - P
         else:
@@ -192,10 +189,6 @@ def do_analysis(doc):
 
     normal_expr = dict([parse_expr_data(x) for x in open("TCGA-" + tumor + "-normal/TCGA-" + tumor + "-expression-normal.matrix")])
     tumor_expr = dict([parse_expr_data(x) for x in open("TCGA-" + tumor + "-normalAssociated/TCGA-" + tumor + "-expression-normalAssociated.matrix")])
-
-    print("normal genes: ", len(normal_expr.keys()))
-    print("tumor genes: ", len(tumor_expr.keys()))
-
 
     list_genes = [GeneAnnotation(l) for l in open("TCGA-" + tumor + "-normal/TCGA-" + tumor + "-expression-normal.matrix")]
     print("considered genes: ", len(list_genes))
@@ -254,14 +247,21 @@ def do_analysis(doc):
 
                 for j in fo:
                     count_outliers_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
-            null_mean = np.mean(count_junctions_mutations)
-            null_std = np.std(count_junctions_mutations)
+
+            null_mean_distribution = []
+            for i in range(250):
+                samp = random.sample(count_junctions_mutations, bottom_outliers_position)
+                null_mean_distribution.append(np.mean(samp))
+
+            null_mean = np.mean(null_mean_distribution)
+            null_sigma = np.mean(null_mean_distribution)
+
             data_table.add_row(("center",
                                 str(px),
                                 str(top_outliers_position-bottom_outliers_position),
                                 '%.5f' % np.mean(count_junctions_mutations),
                                 '%.5f' % np.std(count_junctions_mutations),
-                                get_pval(null_mean, null_std, np.mean(count_junctions_mutations))
+                                get_pval(null_mean, null_sigma, np.mean(count_junctions_mutations))
                                 ))
             if np.mean(count_bottom_mutations) > null_mean:
                 bottom_name = "bottom UP"
@@ -272,7 +272,7 @@ def do_analysis(doc):
                                 str(bottom_outliers_position),
                                 '%.5f' % np.mean(count_bottom_mutations),
                                 '%.5f' % np.std(count_bottom_mutations),
-                                get_pval(null_mean, null_std, np.mean(count_bottom_mutations))
+                                get_pval(null_mean, null_sigma, np.mean(count_bottom_mutations))
                                 ))
             if np.mean(count_outliers_mutations) > null_mean:
                 top_name = "top UP"
@@ -283,43 +283,10 @@ def do_analysis(doc):
                                 str(len(sorted_junctions) - top_outliers_position),
                                 '%.5f' % np.mean(count_outliers_mutations),
                                 '%.5f' % np.std(count_outliers_mutations),
-                                get_pval(null_mean, null_std, np.mean(count_outliers_mutations))
+                                get_pval(null_mean, null_sigma, np.mean(count_outliers_mutations))
                                 ))
             data_table.add_hline()
 
-    #top_outliers_position = get_outliers_slope(sorted_junctions)
-    top_outliers_position = int(0.95*len(sorted_junctions))
-    bottom_outliers_position = int(0.05*len(sorted_junctions))
-
-
-    count_bottom_mutations = []
-    count_junctions_mutations = []
-    count_outliers_mutations = []
-    for c in list_chroms:
-        fb = [x for x in sorted_junctions[0:bottom_outliers_position] if x.chrom == c]
-        fj = [x for x in sorted_junctions[bottom_outliers_position:top_outliers_position] if x.chrom == c]
-        fo = [x for x in sorted_junctions[top_outliers_position:] if x.chrom == c]
-        fm = [x for x in list_mutations if x.chrom == c]
-
-        for j in fb:
-            count_bottom_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
-
-        for j in fj:
-            count_junctions_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
-
-        for j in fo:
-            count_outliers_mutations.append(len([m for m in fm if j.start < m.position < j.stop]))
-
-    mutations_count = []
-    for i in range(250):
-        count_mut = []
-        samp = random.sample(sorted_junctions, bottom_outliers_position)
-        for c in list_chroms:
-            fj = [x for x in samp if x.chrom == c]
-            fm = [x for x in list_mutations if x.chrom == c]
-            for j in fj:
-                count_mut.append(len([m for m in fm if j.start < m.position < j.stop]))
-        mutations_count.append(np.mean(count_mut))
 
 e_methods = [Point_E_ratio(), Point_E_maxLR()]
 
